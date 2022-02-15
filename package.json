@@ -1,0 +1,7 @@
+{
+  "dependencies": {
+    "elm-format": "^0.8.5",
+    "elm-live": "^4.0.0-rc.1",
+    "elm-review": "^2.7.0"
+  }
+}
