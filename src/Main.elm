@@ -13,7 +13,7 @@ import Statistics
 import Time
 import Transition exposing (Transition)
 import TypedSvg exposing (g, svg)
-import TypedSvg.Attributes exposing (class, fill, stroke, transform, viewBox)
+import TypedSvg.Attributes exposing (class, fill, opacity, stroke, transform, viewBox)
 import TypedSvg.Attributes.InPx exposing (strokeWidth)
 import TypedSvg.Core exposing (Svg)
 import TypedSvg.Types exposing (Paint(..), Transform(..))
@@ -22,7 +22,7 @@ import TypedSvg.Types exposing (Paint(..), Transform(..))
 type Msg
     = Tick Int
     | DataRequested Time.Posix
-    | DataArrived (List Datum)
+    | DataArrived (List Series)
 
 
 type alias Extent =
@@ -30,8 +30,7 @@ type alias Extent =
 
 
 type alias Model =
-    { data : List Datum
-    , dataT : Transition (List Datum)
+    { series : List Series
     , extent : Extent
     , extentT : Transition Extent
     }
@@ -50,8 +49,11 @@ type alias Series =
 
 init : () -> ( Model, Cmd msg )
 init _ =
-    ( { data = []
-      , dataT = Transition.constant []
+    ( { series =
+            [ { name = "Chrysler", data = [], color = Color.green }
+            , { name = "Toyota", data = [], color = Color.blue }
+            , { name = "Volvo", data = [], color = Color.red }
+            ]
       , extent = initExtent
       , extentT = Transition.constant initExtent
       }
@@ -69,7 +71,7 @@ initExtent =
             Time.millisToPosix endMillis
 
         start =
-            endMillis - days 20 |> Time.millisToPosix
+            endMillis - days 1 |> Time.millisToPosix
     in
     ( start, end )
 
@@ -122,16 +124,25 @@ tranfromToAreaData model { x, y } =
         )
 
 
-line : Model -> Path
-line model =
-    List.map (transformToLineData model) (Transition.value model.dataT)
+line : Series -> Model -> Path
+line series model =
+    List.map (transformToLineData model) series.data
         |> Shape.line Shape.monotoneInXCurve
 
 
-area : Model -> Path
-area model =
-    List.map (tranfromToAreaData model) (Transition.value model.dataT)
+area : Series -> Model -> Path
+area series model =
+    List.map (tranfromToAreaData model) series.data
         |> Shape.area Shape.monotoneInXCurve
+
+
+withOpacity : Float -> Color -> Color
+withOpacity opacity color =
+    let
+        c =
+            color |> Color.toHsla
+    in
+    { c | alpha = opacity } |> Color.fromHsla
 
 
 view : Model -> Document msg
@@ -144,9 +155,15 @@ view model =
             , g [ transform [ Translate (padding - 1) padding ] ]
                 [ yAxis ]
             , g [ transform [ Translate padding padding ], class [ "series" ] ]
-                [ Path.element (area model) [ strokeWidth 3, fill <| Paint <| Color.rgba 1 0 0 0.54 ]
-                , Path.element (line model) [ stroke <| Paint <| Color.rgb 1 0 0, strokeWidth 3, fill PaintNone ]
-                ]
+                (model.series
+                    |> List.map
+                        (\series ->
+                            g []
+                                [ Path.element (area series model) [ strokeWidth 3, fill <| Paint <| withOpacity 0.5 <| series.color ]
+                                , Path.element (line series model) [ stroke <| Paint <| series.color, strokeWidth 3, fill PaintNone ]
+                                ]
+                        )
+                )
             ]
         ]
     }
@@ -179,44 +196,6 @@ interpolateExtent =
     Interpolation.tuple interpolatePosix interpolatePosix
 
 
-interpolateData : List Datum -> List Datum -> Interpolator (List Datum)
-interpolateData =
-    Interpolation.list
-        { add = interpolateDatumFromNothing
-        , remove = interpolateDatumToNothing
-        , change = interpolateDatum
-        , id = .id
-        , combine = Interpolation.CombineParallel
-        }
-
-
-interpolateDatumFromNothing : Datum -> Interpolator Datum
-interpolateDatumFromNothing b =
-    let
-        yInterpolator =
-            Interpolation.float 0.0 b.y
-    in
-    Interpolation.map3 Datum (always b.x) yInterpolator (always b.id)
-
-
-interpolateDatumToNothing : Datum -> Interpolator Datum
-interpolateDatumToNothing a =
-    let
-        yInterpolator =
-            Interpolation.float a.y 0.0
-    in
-    Interpolation.map3 Datum (always a.x) yInterpolator (always a.id)
-
-
-interpolateDatum : Datum -> Datum -> Interpolator Datum
-interpolateDatum a b =
-    let
-        yInterpolator =
-            Interpolation.float a.y b.y
-    in
-    Interpolation.map3 Datum (always a.x) yInterpolator (always a.id)
-
-
 days : Float -> Int
 days d =
     d * 24 * 60 * 60 * 1000 |> round
@@ -232,39 +211,39 @@ update msg model =
     case msg of
         DataRequested _ ->
             ( model
-            , if span model <= days 20 then
-                Random.generate DataArrived (randomSeries (Tuple.first currentExtent))
+            , if span model <= days 15 then
+                Random.generate DataArrived (randomSeriess model.series (Tuple.first currentExtent))
 
               else
                 Cmd.none
             )
 
-        DataArrived data ->
+        DataArrived series ->
             let
-                newData : List Datum
-                newData =
-                    data ++ model.data
+                newSeries =
+                    List.map2 (\a b -> { a | data = List.sortBy .id (b.data ++ a.data) }) model.series series
 
                 newExtent : Extent
                 newExtent =
-                    newData
+                    newSeries
+                        |> List.map .data
+                        |> List.concat
                         |> List.map .x
                         |> Statistics.extentBy Time.posixToMillis
                         |> Maybe.withDefault currentExtent
             in
             ( { model
-                | data = newData
-                , dataT = Transition.for 300 (interpolateData (Transition.value model.dataT) newData)
+                | series = newSeries
                 , extent = newExtent
                 , extentT = Transition.for 200 (interpolateExtent currentExtent newExtent)
               }
+                |> Debug.log "model"
             , Cmd.none
             )
 
         Tick i ->
             ( { model
                 | extentT = Transition.step i model.extentT
-                , dataT = Transition.step i model.dataT
               }
             , Cmd.none
             )
@@ -280,22 +259,43 @@ main =
         }
 
 
-randomSeries : Time.Posix -> Random.Generator (List Datum)
-randomSeries startTime =
+sequence : List (Random.Generator a) -> Random.Generator (List a)
+sequence =
+    List.foldr (Random.map2 (::)) (Random.constant [])
+
+
+randomSeriess : List Series -> Time.Posix -> Random.Generator (List Series)
+randomSeriess series startTime =
+    Random.int 3 20
+        |> Random.andThen (\length -> List.map (\s -> randomSeries length s startTime) series |> sequence)
+
+
+randomSeries : Int -> Series -> Time.Posix -> Random.Generator Series
+randomSeries length series startTime =
+    Random.andThen (\data -> Random.constant { series | data = data }) (randomData length startTime)
+
+
+randomData : Int -> Time.Posix -> Random.Generator (List Datum)
+randomData length startTime =
     let
-        newStart : Time.Posix
-        newStart =
-            Time.posixToMillis startTime - days 0.25 |> Time.millisToPosix
+        randomDatum : Int -> Time.Posix -> Random.Generator (List Datum) -> Random.Generator (List Datum)
+        randomDatum length_ startTime_ list =
+            let
+                newId : Int
+                newId =
+                    Time.posixToMillis startTime_ - days 0.25
+
+                newStart : Time.Posix
+                newStart =
+                    newId |> Time.millisToPosix
+            in
+            if length_ > 1 then
+                Random.map2 (::) (Random.map3 Datum (Random.constant newStart) (Random.float 1.0 4.0) (Random.constant newId)) (randomDatum (length_ - 1) newStart list)
+
+            else
+                list
     in
-    Random.andThen identity <|
-        Random.weighted
-            ( 10, Random.constant [] )
-            [ ( 90
-              , Random.map2 (::)
-                    (Random.map3 Datum (Random.constant newStart) (Random.float 1.0 4.0) (Random.constant (Time.posixToMillis newStart)))
-                    (Random.lazy (\_ -> randomSeries newStart))
-              )
-            ]
+    randomDatum length startTime (Random.constant [])
 
 
 subscriptions : Model -> Sub Msg
