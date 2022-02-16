@@ -25,14 +25,16 @@ type Msg
     | DataArrived (List Series)
 
 
-type alias Extent =
-    ( Time.Posix, Time.Posix )
+type alias Extent a =
+    ( a, a )
 
 
 type alias Model =
     { series : List Series
-    , extent : Extent
-    , extentT : Transition Extent
+    , xExtent : Extent Time.Posix
+    , xExtentT : Transition (Extent Time.Posix)
+    , yExtent : Extent Float
+    , yExtentT : Transition (Extent Float)
     }
 
 
@@ -54,15 +56,22 @@ init _ =
             , { name = "Toyota", data = [], color = Color.blue }
             , { name = "Volvo", data = [], color = Color.red }
             ]
-      , extent = initExtent
-      , extentT = Transition.constant initExtent
+      , xExtent = initXExtent
+      , xExtentT = Transition.constant initXExtent
+      , yExtent = initYExtent
+      , yExtentT = Transition.constant initYExtent
       }
     , Cmd.none
     )
 
 
-initExtent : Extent
-initExtent =
+initYExtent : Extent Float
+initYExtent =
+    ( 0.0, 5.0 )
+
+
+initXExtent : Extent Time.Posix
+initXExtent =
     let
         endMillis =
             1448928001000
@@ -93,12 +102,12 @@ padding =
 
 xScale : Model -> ContinuousScale Time.Posix
 xScale model =
-    Scale.time Time.utc ( 0, w - 2 * padding ) (Transition.value model.extentT)
+    Scale.time Time.utc ( 0, w - 2 * padding ) (Transition.value model.xExtentT)
 
 
-yScale : ContinuousScale Float
-yScale =
-    Scale.linear ( h - 2 * padding, 0 ) ( 0, 5 )
+yScale : Model -> ContinuousScale Float
+yScale model =
+    Scale.linear ( h - 2 * padding, 0 ) (Transition.value model.yExtentT)
 
 
 xAxis : Model -> Svg msg
@@ -106,21 +115,21 @@ xAxis model =
     Axis.bottom [ Axis.tickCount 10 ] (xScale model)
 
 
-yAxis : Svg msg
-yAxis =
-    Axis.left [ Axis.tickCount 5 ] yScale
+yAxis : Model -> Svg msg
+yAxis model =
+    Axis.left [ Axis.tickCount 5 ] (yScale model)
 
 
 transformToLineData : Model -> Datum -> Maybe ( Float, Float )
 transformToLineData model { x, y } =
-    Just ( Scale.convert (xScale model) x, Scale.convert yScale y )
+    Just ( Scale.convert (xScale model) x, Scale.convert (yScale model) y )
 
 
 tranfromToAreaData : Model -> Datum -> Maybe ( ( Float, Float ), ( Float, Float ) )
 tranfromToAreaData model { x, y } =
     Just
-        ( ( Scale.convert (xScale model) x, Tuple.first (Scale.rangeExtent yScale) )
-        , ( Scale.convert (xScale model) x, Scale.convert yScale y )
+        ( ( Scale.convert (xScale model) x, Tuple.first (Scale.rangeExtent (yScale model)) )
+        , ( Scale.convert (xScale model) x, Scale.convert (yScale model) y )
         )
 
 
@@ -153,7 +162,7 @@ view model =
             [ g [ transform [ Translate (padding - 1) (h - padding) ] ]
                 [ xAxis model ]
             , g [ transform [ Translate (padding - 1) padding ] ]
-                [ yAxis ]
+                [ yAxis model ]
             , g [ transform [ Translate padding padding ], class [ "series" ] ]
                 (model.series
                     |> List.map
@@ -174,7 +183,7 @@ span model =
     let
         pair : ( Int, Int )
         pair =
-            Tuple.mapBoth Time.posixToMillis Time.posixToMillis model.extent
+            Tuple.mapBoth Time.posixToMillis Time.posixToMillis model.xExtent
     in
     Tuple.second pair - Tuple.first pair
 
@@ -191,7 +200,7 @@ interpolatePosix from to =
     Interpolation.int from_ to_ |> Interpolation.map Time.millisToPosix
 
 
-interpolateExtent : Extent -> Extent -> Interpolator Extent
+interpolateExtent : Extent Time.Posix -> Extent Time.Posix -> Interpolator (Extent Time.Posix)
 interpolateExtent =
     Interpolation.tuple interpolatePosix interpolatePosix
 
@@ -204,15 +213,19 @@ days d =
 update : Msg -> Model -> ( Model, Cmd Msg )
 update msg model =
     let
-        currentExtent : Extent
-        currentExtent =
-            Transition.value model.extentT
+        currentXExtent : Extent Time.Posix
+        currentXExtent =
+            Transition.value model.xExtentT
+
+        currentYExtent : Extent Float
+        currentYExtent =
+            Transition.value model.yExtentT
     in
     case msg of
         DataRequested _ ->
             ( model
             , if span model <= days 15 then
-                Random.generate DataArrived (randomSeriess model.series (Tuple.first currentExtent))
+                Random.generate DataArrived (randomSeriess model.series (Tuple.first currentXExtent))
 
               else
                 Cmd.none
@@ -223,19 +236,31 @@ update msg model =
                 newSeries =
                     List.map2 (\a b -> { a | data = List.sortBy .id (b.data ++ a.data) }) model.series series
 
-                newExtent : Extent
-                newExtent =
+                newXExtent : Extent Time.Posix
+                newXExtent =
                     newSeries
                         |> List.map .data
                         |> List.concat
                         |> List.map .x
                         |> Statistics.extentBy Time.posixToMillis
-                        |> Maybe.withDefault currentExtent
+                        |> Maybe.withDefault currentXExtent
+
+                newYExtent : Extent Float
+                newYExtent =
+                    newSeries
+                        |> List.map .data
+                        |> List.concat
+                        |> List.map .y
+                        |> Statistics.extent
+                        |> Maybe.withDefault ( 0.0, 5.0 )
+                        |> Tuple.mapFirst (always 0.0)
             in
             ( { model
                 | series = newSeries
-                , extent = newExtent
-                , extentT = Transition.for 200 (interpolateExtent currentExtent newExtent)
+                , xExtent = newXExtent
+                , xExtentT = Transition.for 200 (interpolateExtent currentXExtent newXExtent)
+                , yExtent = newYExtent
+                , yExtentT = Transition.for 200 (Interpolation.tuple Interpolation.float Interpolation.float currentYExtent newYExtent)
               }
                 |> Debug.log "model"
             , Cmd.none
@@ -243,7 +268,8 @@ update msg model =
 
         Tick i ->
             ( { model
-                | extentT = Transition.step i model.extentT
+                | xExtentT = Transition.step i model.xExtentT
+                , yExtentT = Transition.step i model.yExtentT
               }
             , Cmd.none
             )
@@ -290,7 +316,7 @@ randomData length startTime =
                     newId |> Time.millisToPosix
             in
             if length_ > 1 then
-                Random.map2 (::) (Random.map3 Datum (Random.constant newStart) (Random.float 1.0 4.0) (Random.constant newId)) (randomDatum (length_ - 1) newStart list)
+                Random.map2 (::) (Random.map3 Datum (Random.constant newStart) (Random.float 200.0 350.0) (Random.constant newId)) (randomDatum (length_ - 1) newStart list)
 
             else
                 list
@@ -301,7 +327,7 @@ randomData length startTime =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ if Transition.isComplete model.extentT then
+        [ if Transition.isComplete model.xExtentT then
             Sub.none
 
           else

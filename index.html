@@ -5275,27 +5275,30 @@ var $elm$time$Time$Posix = function (a) {
 	return {$: 'Posix', a: a};
 };
 var $elm$time$Time$millisToPosix = $elm$time$Time$Posix;
-var $author$project$Main$initExtent = function () {
+var $author$project$Main$initXExtent = function () {
 	var endMillis = 1448928001000;
 	var start = $elm$time$Time$millisToPosix(
 		endMillis - $author$project$Main$days(1));
 	var end = $elm$time$Time$millisToPosix(endMillis);
 	return _Utils_Tuple2(start, end);
 }();
+var $author$project$Main$initYExtent = _Utils_Tuple2(0.0, 5.0);
 var $elm$core$Platform$Cmd$batch = _Platform_batch;
 var $elm$core$Platform$Cmd$none = $elm$core$Platform$Cmd$batch(_List_Nil);
 var $avh4$elm_color$Color$red = A4($avh4$elm_color$Color$RgbaSpace, 204 / 255, 0 / 255, 0 / 255, 1.0);
 var $author$project$Main$init = function (_v0) {
 	return _Utils_Tuple2(
 		{
-			extent: $author$project$Main$initExtent,
-			extentT: $gampleman$elm_visualization$Transition$constant($author$project$Main$initExtent),
 			series: _List_fromArray(
 				[
 					{color: $avh4$elm_color$Color$green, data: _List_Nil, name: 'Chrysler'},
 					{color: $avh4$elm_color$Color$blue, data: _List_Nil, name: 'Toyota'},
 					{color: $avh4$elm_color$Color$red, data: _List_Nil, name: 'Volvo'}
-				])
+				]),
+			xExtent: $author$project$Main$initXExtent,
+			xExtentT: $gampleman$elm_visualization$Transition$constant($author$project$Main$initXExtent),
+			yExtent: $author$project$Main$initYExtent,
+			yExtentT: $gampleman$elm_visualization$Transition$constant($author$project$Main$initYExtent)
 		},
 		$elm$core$Platform$Cmd$none);
 };
@@ -5855,7 +5858,7 @@ var $author$project$Main$subscriptions = function (model) {
 	return $elm$core$Platform$Sub$batch(
 		_List_fromArray(
 			[
-				$gampleman$elm_visualization$Transition$isComplete(model.extentT) ? $elm$core$Platform$Sub$none : $elm$browser$Browser$Events$onAnimationFrameDelta(
+				$gampleman$elm_visualization$Transition$isComplete(model.xExtentT) ? $elm$core$Platform$Sub$none : $elm$browser$Browser$Events$onAnimationFrameDelta(
 				A2($elm$core$Basics$composeR, $elm$core$Basics$round, $author$project$Main$Tick)),
 				A2($elm$time$Time$every, 1000, $author$project$Main$DataRequested)
 			]));
@@ -5920,6 +5923,14 @@ var $gampleman$elm_visualization$Statistics$extentBy = F2(
 					xs,
 					_Utils_Tuple2(x, x)));
 		}
+	});
+var $gampleman$elm_visualization$Statistics$extent = $gampleman$elm_visualization$Statistics$extentBy($elm$core$Basics$identity);
+var $gampleman$elm_visualization$Interpolation$float = F2(
+	function (a, to) {
+		var b = to - a;
+		return function (t) {
+			return a + (b * t);
+		};
 	});
 var $elm$core$Basics$negate = function (n) {
 	return -n;
@@ -6034,13 +6045,6 @@ var $elm$random$Random$generate = F2(
 			$elm$random$Random$Generate(
 				A2($elm$random$Random$map, tagger, generator)));
 	});
-var $gampleman$elm_visualization$Interpolation$float = F2(
-	function (a, to) {
-		var b = to - a;
-		return function (t) {
-			return a + (b * t);
-		};
-	});
 var $gampleman$elm_visualization$Interpolation$int = F2(
 	function (from, to) {
 		return A2(
@@ -6085,6 +6089,14 @@ var $gampleman$elm_visualization$Interpolation$tuple = F4(
 	});
 var $author$project$Main$interpolateExtent = A2($gampleman$elm_visualization$Interpolation$tuple, $author$project$Main$interpolatePosix, $author$project$Main$interpolatePosix);
 var $elm$core$Debug$log = _Debug_log;
+var $elm$core$Tuple$mapFirst = F2(
+	function (func, _v0) {
+		var x = _v0.a;
+		var y = _v0.b;
+		return _Utils_Tuple2(
+			func(x),
+			y);
+	});
 var $elm$random$Random$andThen = F2(
 	function (callback, _v0) {
 		var genA = _v0.a;
@@ -6215,7 +6227,7 @@ var $author$project$Main$randomData = F2(
 						$elm$random$Random$map3,
 						$author$project$Main$Datum,
 						$elm$random$Random$constant(newStart),
-						A2($elm$random$Random$float, 1.0, 4.0),
+						A2($elm$random$Random$float, 200.0, 350.0),
 						$elm$random$Random$constant(newId)),
 					A3(randomDatum, length_ - 1, newStart, list)) : list;
 			});
@@ -6270,7 +6282,7 @@ var $elm$core$Tuple$second = function (_v0) {
 	return y;
 };
 var $author$project$Main$span = function (model) {
-	var pair = A3($elm$core$Tuple$mapBoth, $elm$time$Time$posixToMillis, $elm$time$Time$posixToMillis, model.extent);
+	var pair = A3($elm$core$Tuple$mapBoth, $elm$time$Time$posixToMillis, $elm$time$Time$posixToMillis, model.xExtent);
 	return pair.b - pair.a;
 };
 var $elm$core$Basics$min = F2(
@@ -6309,7 +6321,8 @@ var $elm$core$Maybe$withDefault = F2(
 	});
 var $author$project$Main$update = F2(
 	function (msg, model) {
-		var currentExtent = $gampleman$elm_visualization$Transition$value(model.extentT);
+		var currentYExtent = $gampleman$elm_visualization$Transition$value(model.yExtentT);
+		var currentXExtent = $gampleman$elm_visualization$Transition$value(model.xExtentT);
 		switch (msg.$) {
 			case 'DataRequested':
 				return _Utils_Tuple2(
@@ -6319,7 +6332,7 @@ var $author$project$Main$update = F2(
 						$author$project$Main$days(15)) < 1) ? A2(
 						$elm$random$Random$generate,
 						$author$project$Main$DataArrived,
-						A2($author$project$Main$randomSeriess, model.series, currentExtent.a)) : $elm$core$Platform$Cmd$none);
+						A2($author$project$Main$randomSeriess, model.series, currentXExtent.a)) : $elm$core$Platform$Cmd$none);
 			case 'DataArrived':
 				var series = msg.a;
 				var newSeries = A3(
@@ -6339,9 +6352,9 @@ var $author$project$Main$update = F2(
 						}),
 					model.series,
 					series);
-				var newExtent = A2(
+				var newXExtent = A2(
 					$elm$core$Maybe$withDefault,
-					currentExtent,
+					currentXExtent,
 					A2(
 						$gampleman$elm_visualization$Statistics$extentBy,
 						$elm$time$Time$posixToMillis,
@@ -6357,6 +6370,25 @@ var $author$project$Main$update = F2(
 										return $.data;
 									},
 									newSeries)))));
+				var newYExtent = A2(
+					$elm$core$Tuple$mapFirst,
+					$elm$core$Basics$always(0.0),
+					A2(
+						$elm$core$Maybe$withDefault,
+						_Utils_Tuple2(0.0, 5.0),
+						$gampleman$elm_visualization$Statistics$extent(
+							A2(
+								$elm$core$List$map,
+								function ($) {
+									return $.y;
+								},
+								$elm$core$List$concat(
+									A2(
+										$elm$core$List$map,
+										function ($) {
+											return $.data;
+										},
+										newSeries))))));
 				return _Utils_Tuple2(
 					A2(
 						$elm$core$Debug$log,
@@ -6364,12 +6396,17 @@ var $author$project$Main$update = F2(
 						_Utils_update(
 							model,
 							{
-								extent: newExtent,
-								extentT: A2(
+								series: newSeries,
+								xExtent: newXExtent,
+								xExtentT: A2(
 									$gampleman$elm_visualization$Transition$for,
 									200,
-									A2($author$project$Main$interpolateExtent, currentExtent, newExtent)),
-								series: newSeries
+									A2($author$project$Main$interpolateExtent, currentXExtent, newXExtent)),
+								yExtent: newYExtent,
+								yExtentT: A2(
+									$gampleman$elm_visualization$Transition$for,
+									200,
+									A4($gampleman$elm_visualization$Interpolation$tuple, $gampleman$elm_visualization$Interpolation$float, $gampleman$elm_visualization$Interpolation$float, currentYExtent, newYExtent))
 							})),
 					$elm$core$Platform$Cmd$none);
 			default:
@@ -6378,7 +6415,8 @@ var $author$project$Main$update = F2(
 					_Utils_update(
 						model,
 						{
-							extentT: A2($gampleman$elm_visualization$Transition$step, i, model.extentT)
+							xExtentT: A2($gampleman$elm_visualization$Transition$step, i, model.xExtentT),
+							yExtentT: A2($gampleman$elm_visualization$Transition$step, i, model.yExtentT)
 						}),
 					$elm$core$Platform$Cmd$none);
 		}
@@ -8549,7 +8587,7 @@ var $author$project$Main$xScale = function (model) {
 		$gampleman$elm_visualization$Scale$time,
 		$elm$time$Time$utc,
 		_Utils_Tuple2(0, $author$project$Main$w - (2 * $author$project$Main$padding)),
-		$gampleman$elm_visualization$Transition$value(model.extentT));
+		$gampleman$elm_visualization$Transition$value(model.xExtentT));
 };
 var $author$project$Main$h = 450;
 var $gampleman$elm_visualization$Scale$Continuous$fixPoint = F3(
@@ -8806,10 +8844,12 @@ var $gampleman$elm_visualization$Scale$linear = F2(
 		return $gampleman$elm_visualization$Scale$Scale(
 			A2($gampleman$elm_visualization$Scale$Continuous$linear, range_, domain_));
 	});
-var $author$project$Main$yScale = A2(
-	$gampleman$elm_visualization$Scale$linear,
-	_Utils_Tuple2($author$project$Main$h - (2 * $author$project$Main$padding), 0),
-	_Utils_Tuple2(0, 5));
+var $author$project$Main$yScale = function (model) {
+	return A2(
+		$gampleman$elm_visualization$Scale$linear,
+		_Utils_Tuple2($author$project$Main$h - (2 * $author$project$Main$padding), 0),
+		$gampleman$elm_visualization$Transition$value(model.yExtentT));
+};
 var $author$project$Main$tranfromToAreaData = F2(
 	function (model, _v0) {
 		var x = _v0.x;
@@ -8821,13 +8861,17 @@ var $author$project$Main$tranfromToAreaData = F2(
 						$gampleman$elm_visualization$Scale$convert,
 						$author$project$Main$xScale(model),
 						x),
-					$gampleman$elm_visualization$Scale$rangeExtent($author$project$Main$yScale).a),
+					$gampleman$elm_visualization$Scale$rangeExtent(
+						$author$project$Main$yScale(model)).a),
 				_Utils_Tuple2(
 					A2(
 						$gampleman$elm_visualization$Scale$convert,
 						$author$project$Main$xScale(model),
 						x),
-					A2($gampleman$elm_visualization$Scale$convert, $author$project$Main$yScale, y))));
+					A2(
+						$gampleman$elm_visualization$Scale$convert,
+						$author$project$Main$yScale(model),
+						y))));
 	});
 var $author$project$Main$area = F2(
 	function (series, model) {
@@ -9560,7 +9604,10 @@ var $author$project$Main$transformToLineData = F2(
 					$gampleman$elm_visualization$Scale$convert,
 					$author$project$Main$xScale(model),
 					x),
-				A2($gampleman$elm_visualization$Scale$convert, $author$project$Main$yScale, y)));
+				A2(
+					$gampleman$elm_visualization$Scale$convert,
+					$author$project$Main$yScale(model),
+					y)));
 	});
 var $author$project$Main$line = F2(
 	function (series, model) {
@@ -9997,13 +10044,15 @@ var $gampleman$elm_visualization$Axis$horizontalAttrs = {
 	y2: A2($elm$core$Basics$composeL, $elm$svg$Svg$Attributes$y2, $elm$core$String$fromFloat)
 };
 var $gampleman$elm_visualization$Axis$left = A4($gampleman$elm_visualization$Axis$element, $gampleman$elm_visualization$Axis$horizontalAttrs, -1, '0.32em', 'end');
-var $author$project$Main$yAxis = A2(
-	$gampleman$elm_visualization$Axis$left,
-	_List_fromArray(
-		[
-			$gampleman$elm_visualization$Axis$tickCount(5)
-		]),
-	$author$project$Main$yScale);
+var $author$project$Main$yAxis = function (model) {
+	return A2(
+		$gampleman$elm_visualization$Axis$left,
+		_List_fromArray(
+			[
+				$gampleman$elm_visualization$Axis$tickCount(5)
+			]),
+		$author$project$Main$yScale(model));
+};
 var $author$project$Main$view = function (model) {
 	return {
 		body: _List_fromArray(
@@ -10041,7 +10090,9 @@ var $author$project$Main$view = function (model) {
 									]))
 							]),
 						_List_fromArray(
-							[$author$project$Main$yAxis])),
+							[
+								$author$project$Main$yAxis(model)
+							])),
 						A2(
 						$elm_community$typed_svg$TypedSvg$g,
 						_List_fromArray(
