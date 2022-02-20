@@ -10,7 +10,7 @@ import Interpolation exposing (Interpolator)
 import Path exposing (Path)
 import Random
 import Scale exposing (ContinuousScale)
-import Shape
+import Shape exposing (StackResult)
 import Statistics
 import Time
 import Transition exposing (Transition)
@@ -45,11 +45,9 @@ type Configuration
 type alias Model =
     { config : Configuration
     , series : List Series
-    , seriesT : Transition (List Series)
+    , seriesT : Transition (StackResult String)
     , xExtent : Extent Time.Posix
     , xExtentT : Transition (Extent Time.Posix)
-    , yExtent : Extent Float
-    , yExtentT : Transition (Extent Float)
     }
 
 
@@ -63,7 +61,7 @@ type alias Series =
 type alias Datum =
     { x : Time.Posix
     , y0 : Float
-    , y1 : Float
+    , y : Float
     , id : Int
     }
 
@@ -79,11 +77,9 @@ init _ =
     in
     ( { config = Overlaid
       , series = noDataSeries
-      , seriesT = Transition.constant noDataSeries
+      , seriesT = Transition.constant (overlaid noDataSeries)
       , xExtent = initXExtent
       , xExtentT = Transition.constant initXExtent
-      , yExtent = initYExtent
-      , yExtentT = Transition.constant initYExtent
       }
     , Cmd.none
     )
@@ -131,7 +127,7 @@ xScale model =
 
 yScale : Model -> ContinuousScale Float
 yScale model =
-    Scale.linear ( h - 2 * padding, 0 ) (Transition.value model.yExtentT)
+    Scale.linear ( h - 2 * padding, 0 ) (Transition.value model.seriesT |> .extent)
 
 
 xAxis : Model -> Svg msg
@@ -144,28 +140,28 @@ yAxis model =
     Axis.left [ Axis.tickCount 5 ] (yScale model)
 
 
-transformToLineData : Model -> Datum -> Maybe ( Float, Float )
-transformToLineData model { x, y1 } =
+transformToLineData : Model -> ( Time.Posix, Float, Float ) -> Maybe ( Float, Float )
+transformToLineData model ( x, y0, y1 ) =
     Just ( Scale.convert (xScale model) x, Scale.convert (yScale model) y1 )
 
 
-tranfromToAreaData : Model -> Datum -> Maybe ( ( Float, Float ), ( Float, Float ) )
-tranfromToAreaData model { x, y0, y1 } =
+tranfromToAreaData : Model -> ( Time.Posix, Float, Float ) -> Maybe ( ( Float, Float ), ( Float, Float ) )
+tranfromToAreaData model ( x, y0, y1 ) =
     Just
         ( ( Scale.convert (xScale model) x, Scale.convert (yScale model) y0 )
         , ( Scale.convert (xScale model) x, Scale.convert (yScale model) y1 )
         )
 
 
-line : Series -> Model -> Path
+line : List ( Time.Posix, Float, Float ) -> Model -> Path
 line series model =
-    List.map (transformToLineData model) series.data
+    List.map (transformToLineData model) series
         |> Shape.line Shape.monotoneInXCurve
 
 
-area : Series -> Model -> Path
+area : List ( Time.Posix, Float, Float ) -> Model -> Path
 area series model =
-    List.map (tranfromToAreaData model) series.data
+    List.map (tranfromToAreaData model) series
         |> Shape.area Shape.monotoneInXCurve
 
 
@@ -178,14 +174,25 @@ withOpacity opacity color =
     { c | alpha = opacity } |> Color.fromHsla
 
 
+seriessToCoords : Model -> List { series : Series, coordinates : List ( Time.Posix, Float, Float ) }
+seriessToCoords model =
+    List.map2
+        (\series transitionedData ->
+            { series = series, coordinates = List.map2 (\da db -> ( da.x, Tuple.first db, Tuple.second db )) series.data transitionedData }
+        )
+        model.series
+        (Transition.value model.seriesT |> .values)
+
+
 viewSeries : Model -> List (Svg Msg)
 viewSeries model =
-    model.series
+    model
+        |> seriessToCoords
         |> List.map
-            (\series ->
+            (\s ->
                 g []
-                    [ Path.element (area series model) [ strokeWidth 3, fill <| Paint <| withOpacity 0.5 <| series.color ]
-                    , Path.element (line series model) [ stroke <| Paint <| series.color, strokeWidth 3, fill PaintNone ]
+                    [ Path.element (area s.coordinates model) [ strokeWidth 3, fill <| Paint <| withOpacity 0.5 <| s.series.color ]
+                    , Path.element (line s.coordinates model) [ stroke <| Paint <| s.series.color, strokeWidth 3, fill PaintNone ]
                     ]
             )
 
@@ -251,29 +258,16 @@ interpolateExtent =
     Interpolation.tuple interpolatePosix interpolatePosix
 
 
-interpolateSeriesList : List Series -> List Series -> Interpolator (List Series)
-interpolateSeriesList a b f =
-    List.map2 (\sa sb -> interpolateSeries sa sb f) a b
-
-
-interpolateSeries : Series -> Series -> Interpolator Series
-interpolateSeries a b f =
-    { a | data = interpolateData a.data b.data f }
-
-
-interpolateData : List Datum -> List Datum -> Interpolator (List Datum)
-interpolateData a b f =
-    List.map2 (\da db -> interpolateDatum da db f) a b
-
-
-interpolateDatum : Datum -> Datum -> Interpolator Datum
-interpolateDatum a b =
-    Interpolation.map4 Datum (interpolatePosix a.x b.x) (Interpolation.float a.y0 b.y0) (Interpolation.float a.y1 b.y1) (constant a.id b.id)
-
-
-constant : Int -> Int -> Interpolator Int
-constant a _ =
-    always a
+interpolateStackResult : StackResult String -> StackResult String -> Float -> StackResult String
+interpolateStackResult a b f =
+    let
+        extentInterpolator a1 b1 =
+            Interpolation.tuple Interpolation.float Interpolation.float a1 b1 f
+    in
+    { extent = extentInterpolator a.extent b.extent
+    , labels = List.sort b.labels
+    , values = List.map2 (\sa sb -> List.map2 (\da db -> extentInterpolator da db) sa sb) a.values b.values
+    }
 
 
 days : Float -> Int
@@ -287,10 +281,6 @@ update msg model =
         currentXExtent : Extent Time.Posix
         currentXExtent =
             Transition.value model.xExtentT
-
-        currentYExtent : Extent Float
-        currentYExtent =
-            Transition.value model.yExtentT
     in
     case msg of
         DataRequested _ ->
@@ -304,6 +294,7 @@ update msg model =
 
         DataArrived series ->
             let
+                newSeries : List Series
                 newSeries =
                     List.map2 (\a b -> { a | data = List.sortBy .id (b.data ++ a.data) }) model.series series
 
@@ -316,31 +307,38 @@ update msg model =
                         |> Statistics.extentBy Time.posixToMillis
                         |> Maybe.withDefault currentXExtent
 
-                newYExtent : Extent Float
-                newYExtent =
-                    newSeries
-                        |> List.map .data
-                        |> List.concat
-                        |> List.map .y1
-                        |> Statistics.extent
-                        |> Maybe.withDefault ( 0.0, 5.0 )
-                        |> Tuple.mapFirst (always 0.0)
+                currentStackResult : StackResult String
+                currentStackResult =
+                    Transition.value model.seriesT
+
+                normalizedCurrentSeries : StackResult String
+                normalizedCurrentSeries =
+                    { currentStackResult
+                        | values =
+                            List.map2 (\listOfFloats series_ -> List.repeat (List.length series_.data) ( 0.0, 0.0 ) ++ listOfFloats)
+                                currentStackResult.values
+                                series
+                    }
+
+                _ =
+                    Debug.log "newSeries length" (List.head newSeries |> Maybe.map (.data >> List.length) |> Maybe.withDefault -1)
+
+                _ =
+                    Debug.log "normalizedCurrentSeries length" (List.head normalizedCurrentSeries.values |> Maybe.map List.length |> Maybe.withDefault -1)
             in
             ( { model
                 | series = newSeries
+                , seriesT = Transition.for 300 (interpolateStackResult normalizedCurrentSeries (currentStacking newSeries model))
                 , xExtent = newXExtent
                 , xExtentT = Transition.for 200 (interpolateExtent currentXExtent newXExtent)
-                , yExtent = newYExtent
-                , yExtentT = Transition.for 200 (Interpolation.tuple Interpolation.float Interpolation.float currentYExtent newYExtent)
               }
-                |> Debug.log "model"
             , Cmd.none
             )
 
         Tick i ->
             ( { model
                 | xExtentT = Transition.step i model.xExtentT
-                , yExtentT = Transition.step i model.yExtentT
+                , seriesT = Transition.step i model.seriesT
               }
             , Cmd.none
             )
@@ -348,7 +346,7 @@ update msg model =
         OverlayClicked ->
             ( { model
                 | config = Overlaid
-                , seriesT = Transition.for 500 (interpolateSeriesList (Transition.value model.seriesT) (overlaid model.series))
+                , seriesT = Transition.for 500 (interpolateStackResult (Transition.value model.seriesT) (overlaid model.series))
               }
             , Cmd.none
             )
@@ -356,7 +354,7 @@ update msg model =
         StackedClicked ->
             ( { model
                 | config = Stacked
-                , seriesT = Transition.for 500 (interpolateSeriesList (Transition.value model.seriesT) (stacked model.series))
+                , seriesT = Transition.for 500 (interpolateStackResult (Transition.value model.seriesT) (stacked model.series))
               }
             , Cmd.none
             )
@@ -364,7 +362,7 @@ update msg model =
         StreamClicked ->
             ( { model
                 | config = Stream
-                , seriesT = Transition.for 500 (interpolateSeriesList (Transition.value model.seriesT) (stream model.series))
+                , seriesT = Transition.for 500 (interpolateStackResult (Transition.value model.seriesT) (stream model.series))
               }
             , Cmd.none
             )
@@ -372,30 +370,80 @@ update msg model =
         SeparateClicked ->
             ( { model
                 | config = Separate
-                , seriesT = Transition.for 500 (interpolateSeriesList (Transition.value model.seriesT) (separate model.series))
+                , seriesT = Transition.for 500 (interpolateStackResult (Transition.value model.seriesT) (separate model.series))
               }
             , Cmd.none
             )
 
 
-overlaid : List Series -> List Series
+currentStacking : List Series -> Model -> StackResult String
+currentStacking series model =
+    case model.config of
+        Overlaid ->
+            overlaid series
+
+        Stacked ->
+            stacked series
+
+        Stream ->
+            stream series
+
+        Separate ->
+            separate series
+
+
+overlaid : List Series -> StackResult String
 overlaid series =
-    series
+    { values = List.map (\s -> List.map (\d -> ( 0.0, d.y )) s.data) series
+    , labels = List.map .name series
+    , extent =
+        Statistics.extent (List.map .y (List.concatMap .data series))
+            |> Maybe.withDefault initYExtent
+            |> Tuple.mapFirst
+                (\low ->
+                    if low > 0 then
+                        0
+
+                    else
+                        low
+                )
+    }
 
 
-stacked : List Series -> List Series
+stacked : List Series -> StackResult String
 stacked series =
-    series
+    let
+        config =
+            { data = List.map (\s -> Tuple.pair s.name (List.map .y s.data)) series
+            , offset = Shape.stackOffsetNone
+            , order = identity
+            }
+    in
+    Shape.stack config
 
 
-stream : List Series -> List Series
+stream : List Series -> StackResult String
 stream series =
-    series
+    let
+        config =
+            { data = List.map (\s -> Tuple.pair s.name (List.map .y s.data)) series
+            , offset = Shape.stackOffsetWiggle
+            , order = identity
+            }
+    in
+    Shape.stack config
 
 
-separate : List Series -> List Series
+separate : List Series -> StackResult String
 separate series =
-    series
+    let
+        config =
+            { data = List.map (\s -> Tuple.pair s.name (List.map .y s.data)) series
+            , offset = stackOffsetSeparated
+            , order = identity
+            }
+    in
+    Shape.stack config
 
 
 main : Program () Model Msg
@@ -439,7 +487,7 @@ randomData length startTime =
                     newId |> Time.millisToPosix
             in
             if length_ > 1 then
-                Random.map2 (::) (Random.map4 Datum (Random.constant newStart) (Random.constant 0.0) (Random.float 200.0 350.0) (Random.constant newId)) (randomDatum (length_ - 1) newStart list)
+                Random.map2 (::) (Random.map4 Datum (Random.constant newStart) (Random.constant 0.0) (Random.float 10.0 350.0) (Random.constant newId)) (randomDatum (length_ - 1) newStart list)
 
             else
                 list
@@ -450,7 +498,7 @@ randomData length startTime =
 subscriptions : Model -> Sub Msg
 subscriptions model =
     Sub.batch
-        [ if Transition.isComplete model.xExtentT then
+        [ if Transition.isComplete model.xExtentT && Transition.isComplete model.seriesT then
             Sub.none
 
           else
