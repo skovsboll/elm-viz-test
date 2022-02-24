@@ -66,6 +66,12 @@ type alias Datum =
     }
 
 
+
+-----------------------------------------
+---- Init
+-----------------------------------------
+
+
 init : () -> ( Model, Cmd msg )
 init _ =
     let
@@ -105,6 +111,12 @@ initXExtent =
     ( start, end )
 
 
+
+-----------------------------------------
+---- Dimensions
+-----------------------------------------
+
+
 w : Float
 w =
     900
@@ -128,6 +140,12 @@ xScale model =
 yScale : Model -> ContinuousScale Float
 yScale model =
     Scale.linear ( h - 2 * padding, 0 ) (Transition.value model.seriesT |> .extent)
+
+
+
+-----------------------------------------
+---- View
+-----------------------------------------
 
 
 xAxis : Model -> Svg msg
@@ -192,7 +210,7 @@ viewSeries model =
             (\s ->
                 g []
                     [ Path.element (area s.coordinates model) [ strokeWidth 3, fill <| Paint <| withOpacity 0.5 <| s.series.color ]
-                    , Path.element (line s.coordinates model) [ stroke <| Paint <| s.series.color, strokeWidth 3, fill PaintNone ]
+                    , Path.element (line s.coordinates model) [ stroke <| Paint <| s.series.color, strokeWidth 1, fill PaintNone ]
                     ]
             )
 
@@ -217,28 +235,10 @@ view model =
     }
 
 
-span : Model -> Int
-span model =
-    let
-        pair : ( Int, Int )
-        pair =
-            Tuple.mapBoth Time.posixToMillis Time.posixToMillis model.xExtent
-    in
-    Tuple.second pair - Tuple.first pair
 
-
-stackOffsetSeparated : List (List ( Float, Float )) -> List (List ( Float, Float ))
-stackOffsetSeparated series =
-    List.foldl
-        (\s1 ( maxSoFar, accum ) ->
-            ( maxSoFar + (s1 |> List.map Tuple.second |> List.maximum |> Maybe.withDefault 0)
-            , List.map (\( _, hi ) -> ( maxSoFar, maxSoFar + hi )) s1 :: accum
-            )
-        )
-        ( 0, [] )
-        series
-        |> Tuple.second
-        |> List.reverse
+-----------------------------------------
+---- Interpolation
+-----------------------------------------
 
 
 interpolatePosix : Time.Posix -> Time.Posix -> Interpolator Time.Posix
@@ -273,6 +273,12 @@ interpolateStackResult a b f =
 days : Float -> Int
 days d =
     d * 24 * 60 * 60 * 1000 |> round
+
+
+
+-----------------------------------------
+---- Update
+-----------------------------------------
 
 
 update : Msg -> Model -> ( Model, Cmd Msg )
@@ -319,12 +325,6 @@ update msg model =
                                 currentStackResult.values
                                 series
                     }
-
-                _ =
-                    Debug.log "newSeries length" (List.head newSeries |> Maybe.map (.data >> List.length) |> Maybe.withDefault -1)
-
-                _ =
-                    Debug.log "normalizedCurrentSeries length" (List.head normalizedCurrentSeries.values |> Maybe.map List.length |> Maybe.withDefault -1)
             in
             ( { model
                 | series = newSeries
@@ -374,6 +374,32 @@ update msg model =
               }
             , Cmd.none
             )
+
+
+span : Model -> Int
+span model =
+    let
+        pair : ( Int, Int )
+        pair =
+            Tuple.mapBoth Time.posixToMillis Time.posixToMillis model.xExtent
+    in
+    Tuple.second pair - Tuple.first pair
+
+
+main : Program () Model Msg
+main =
+    Browser.document
+        { init = init
+        , view = view
+        , update = update
+        , subscriptions = subscriptions
+        }
+
+
+
+----------------------------------------------
+--- View modes
+----------------------------------------------
 
 
 currentStacking : List Series -> Model -> StackResult String
@@ -446,14 +472,42 @@ separate series =
     Shape.stack config
 
 
-main : Program () Model Msg
-main =
-    Browser.document
-        { init = init
-        , view = view
-        , update = update
-        , subscriptions = subscriptions
-        }
+stackOffsetSeparated : List (List ( Float, Float )) -> List (List ( Float, Float ))
+stackOffsetSeparated series =
+    List.foldl
+        (\s1 ( maxSoFar, accum ) ->
+            ( maxSoFar + (s1 |> List.map Tuple.second |> List.maximum |> Maybe.withDefault 0)
+            , List.map (\( _, hi ) -> ( maxSoFar, maxSoFar + hi )) s1 :: accum
+            )
+        )
+        ( 0, [] )
+        series
+        |> Tuple.second
+        |> List.reverse
+
+
+
+----------------------------------------------
+--- Subscriptions
+----------------------------------------------
+
+
+subscriptions : Model -> Sub Msg
+subscriptions model =
+    Sub.batch
+        [ if Transition.isComplete model.xExtentT && Transition.isComplete model.seriesT then
+            Sub.none
+
+          else
+            Browser.Events.onAnimationFrameDelta (round >> Tick)
+        , Time.every 1000 DataRequested
+        ]
+
+
+
+----------------------------------------------
+--- Random
+----------------------------------------------
 
 
 randomSequence : List (Random.Generator a) -> Random.Generator (List a)
@@ -493,15 +547,3 @@ randomData length startTime =
                 list
     in
     randomDatum length startTime (Random.constant [])
-
-
-subscriptions : Model -> Sub Msg
-subscriptions model =
-    Sub.batch
-        [ if Transition.isComplete model.xExtentT && Transition.isComplete model.seriesT then
-            Sub.none
-
-          else
-            Browser.Events.onAnimationFrameDelta (round >> Tick)
-        , Time.every 1000 DataRequested
-        ]
