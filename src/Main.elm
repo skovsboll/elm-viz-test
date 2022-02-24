@@ -1,16 +1,21 @@
 module Main exposing (main)
 
 import Axis
+import Bitwise exposing (and, or, shiftLeftBy)
 import Browser exposing (Document)
 import Browser.Events
+import Bytes exposing (Bytes)
+import Bytes.Encode as Encode
 import Color exposing (Color)
 import Html exposing (a, button, text)
 import Html.Events exposing (onClick)
 import Interpolation exposing (Interpolator)
 import Path exposing (Path)
 import Random
+import SHA1
 import Scale exposing (ContinuousScale)
 import Shape exposing (StackResult)
+import Force
 import Statistics
 import Time
 import Transition exposing (Transition)
@@ -75,11 +80,13 @@ type alias Datum =
 init : () -> ( Model, Cmd msg )
 init _ =
     let
+        noDataSeries : List Series
         noDataSeries =
             [ { name = "Chrysler", data = [], color = Color.green }
             , { name = "Toyota", data = [], color = Color.blue }
-            , { name = "Volvo", data = [], color = Color.red }
+            , { name = "VW", data = [], color = Color.red }
             ]
+            |> List.map (\s -> { s | color = nameToColor s.name })
     in
     ( { config = Overlaid
       , series = noDataSeries
@@ -140,6 +147,91 @@ xScale model =
 yScale : Model -> ContinuousScale Float
 yScale model =
     Scale.linear ( h - 2 * padding, 0 ) (Transition.value model.seriesT |> .extent)
+
+saturationScale : ContinuousScale Float
+saturationScale =
+    Scale.linear ( 0.5, 1.0 ) (0.0, 1.0)    
+
+lightnessScale : ContinuousScale Float
+lightnessScale =
+    Scale.linear ( 0.2, 0.8 ) (0.0, 1.0)    
+
+
+-----------------------------------------
+---- Colors
+-----------------------------------------
+
+
+nameToColor : String -> Color
+nameToColor name =
+    let
+        fractions : List Float
+        fractions =
+            SHA1.fromString name
+                |> SHA1.toByteValues
+                |> List.map toFloat
+                |> List.map (\byte -> byte / 256.0)
+                |> Debug.log "fractions"
+    in
+    case fractions of
+        a :: b :: rest ->
+            Color.fromHsla { 
+                hue = a
+                , lightness = 0.5
+                , saturation = Scale.convert saturationScale b
+                , alpha = 1.0 }
+
+        _ ->
+            Color.blue
+
+
+spaceColors : List Color -> List Color
+spaceColors colors =
+    let
+        force : Force.Force Int
+        force = 
+            List.range 0 ((List.length colors) -1)
+            |> Force.manyBody
+
+        state : Force.State Int
+        state =
+             Force.simulation [force]
+
+        colorEntities : List Color -> List (Force.Entity Int a)
+        colorEntities =
+            colors 
+                |> List.map Color.toHsla 
+                |> List.map (\c -> (c.hue, c.saturation))
+                |> List.map fromPolar
+                |> List.indexedMap (\i (x, y) ->  
+                    {
+                      x = x
+                    , y = y
+                    , vx = 0.0
+                    , vy = 0.0
+                    , id = i
+                        }
+                    )
+
+        simulationResult : List (Force.Entity Int a)
+        simulationResult = Force.computeSimulation state (colorEntities colors)
+            
+        List.map2 (\c { x, y} -> (toPolar x y, c) ) colors simulationResult
+
+
+    in
+    resultingColors
+    |> List.map
+    |> List.map toPolar
+    |> List.map (\(a, b) -> { 
+                hue = a
+                , lightness = 0.5
+                , saturation = Scale.convert saturationScale b
+                , alpha = 1.0 } )
+    |> List.map Color.fromHsla
+
+
+
 
 
 
