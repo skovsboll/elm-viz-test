@@ -1,13 +1,13 @@
 module Main exposing (main)
 
 import Axis
-import Bitwise exposing (and, or, shiftLeftBy)
+import Basics as Math
 import Browser exposing (Document)
 import Browser.Events
-import Bytes exposing (Bytes)
-import Bytes.Encode as Encode
 import Color exposing (Color)
-import Html exposing (a, button, text)
+import Force
+import Html exposing (Html, a, button, table, tbody, td, text, th, thead, tr)
+import Html.Attributes exposing (style)
 import Html.Events exposing (onClick)
 import Interpolation exposing (Interpolator)
 import Path exposing (Path)
@@ -15,7 +15,6 @@ import Random
 import SHA1
 import Scale exposing (ContinuousScale)
 import Shape exposing (StackResult)
-import Force
 import Statistics
 import Time
 import Transition exposing (Transition)
@@ -33,7 +32,7 @@ type Msg
     | OverlayClicked
     | StackedClicked
     | StreamClicked
-    | SeparateClicked
+    | RidgeClicked
 
 
 type alias Extent a =
@@ -44,7 +43,7 @@ type Configuration
     = Overlaid
     | Stacked
     | Stream
-    | Separate
+    | Ridge
 
 
 type alias Model =
@@ -80,22 +79,51 @@ type alias Datum =
 init : () -> ( Model, Cmd msg )
 init _ =
     let
-        noDataSeries : List Series
-        noDataSeries =
-            [ { name = "Chrysler", data = [], color = Color.green }
-            , { name = "Toyota", data = [], color = Color.blue }
-            , { name = "VW", data = [], color = Color.red }
-            ]
-            |> List.map (\s -> { s | color = nameToColor s.name })
+        spacedColors : List Color
+        spacedColors =
+            noDataSeries
+                |> List.map .color
+                |> spaceColors
+
+        recoloredDataSeries : List Series
+        recoloredDataSeries =
+            List.map2 (\s c -> { s | color = c }) noDataSeries spacedColors
     in
-    ( { config = Overlaid
-      , series = noDataSeries
-      , seriesT = Transition.constant (overlaid noDataSeries)
+    ( { config = Stream
+      , series = recoloredDataSeries
+      , seriesT = Transition.constant (overlaid recoloredDataSeries)
       , xExtent = initXExtent
       , xExtentT = Transition.constant initXExtent
       }
     , Cmd.none
     )
+
+
+noDataSeries : List Series
+noDataSeries =
+    [ { name = "Chrysler", data = [], color = Color.green }
+    , { name = "Toyota", data = [], color = Color.blue }
+    , { name = "VW", data = [], color = Color.red }
+    , { name = "Hyundai", data = [], color = Color.red }
+    , { name = "Honda", data = [], color = Color.red }
+    , { name = "Ford", data = [], color = Color.red }
+    , { name = "Kia0", data = [], color = Color.red }
+    , { name = "Kia2", data = [], color = Color.red }
+    , { name = "Kia3", data = [], color = Color.red }
+    , { name = "Kia4", data = [], color = Color.red }
+    , { name = "Kia5", data = [], color = Color.red }
+    , { name = "Kia6", data = [], color = Color.red }
+    , { name = "Kia7", data = [], color = Color.red }
+    , { name = "Kia8", data = [], color = Color.red }
+    , { name = "Kia9", data = [], color = Color.red }
+    , { name = "KiaA", data = [], color = Color.red }
+    , { name = "KiaB", data = [], color = Color.red }
+    , { name = "KiaC", data = [], color = Color.red }
+    , { name = "KiaD", data = [], color = Color.red }
+    , { name = "KiaE", data = [], color = Color.red }
+    , { name = "KiaF", data = [], color = Color.red }
+    ]
+        |> List.map (\s -> { s | color = nameToColor s.name })
 
 
 initYExtent : Extent Float
@@ -148,13 +176,21 @@ yScale : Model -> ContinuousScale Float
 yScale model =
     Scale.linear ( h - 2 * padding, 0 ) (Transition.value model.seriesT |> .extent)
 
+
 saturationScale : ContinuousScale Float
 saturationScale =
-    Scale.linear ( 0.5, 1.0 ) (0.0, 1.0)    
+    Scale.linear ( 0.15, 0.85 ) ( 0.0, 1.0 )
+
+
+saturationScaleWithExtent : ( Float, Float ) -> ContinuousScale Float
+saturationScaleWithExtent extent =
+    Scale.linear (Scale.range saturationScale) extent
+
 
 lightnessScale : ContinuousScale Float
 lightnessScale =
-    Scale.linear ( 0.2, 0.8 ) (0.0, 1.0)    
+    Scale.linear ( 0.85, 0.35 ) ( 0.0, 1.0 )
+
 
 
 -----------------------------------------
@@ -171,15 +207,15 @@ nameToColor name =
                 |> SHA1.toByteValues
                 |> List.map toFloat
                 |> List.map (\byte -> byte / 256.0)
-                |> Debug.log "fractions"
     in
     case fractions of
-        a :: b :: rest ->
-            Color.fromHsla { 
-                hue = a
+        a :: b :: _ ->
+            Color.fromHsla
+                { hue = a
                 , lightness = 0.5
                 , saturation = Scale.convert saturationScale b
-                , alpha = 1.0 }
+                , alpha = 1.0
+                }
 
         _ ->
             Color.blue
@@ -188,50 +224,80 @@ nameToColor name =
 spaceColors : List Color -> List Color
 spaceColors colors =
     let
+        numberOfBodies : Math.Int
+        numberOfBodies =
+            List.length colors
+
+        iterations =
+            3
+
         force : Force.Force Int
-        force = 
-            List.range 0 ((List.length colors) -1)
-            |> Force.manyBody
+        force =
+            List.range 0 (numberOfBodies - 1)
+                |> Force.manyBodyStrength (toFloat -numberOfBodies / iterations)
 
         state : Force.State Int
         state =
-             Force.simulation [force]
+            Force.simulation [ force ]
+                |> Force.iterations iterations
 
-        colorEntities : List Color -> List (Force.Entity Int a)
+        polarInputColors : List ( Float, Float )
+        polarInputColors =
+            colors
+                |> List.map Color.toHsla
+                |> List.map (\c -> fromPolar ( c.saturation, c.hue * 2 * Math.pi ))
+
+        colorEntities : List (Force.Entity Int {})
         colorEntities =
-            colors 
-                |> List.map Color.toHsla 
-                |> List.map (\c -> (c.hue, c.saturation))
-                |> List.map fromPolar
-                |> List.indexedMap (\i (x, y) ->  
-                    {
-                      x = x
-                    , y = y
-                    , vx = 0.0
-                    , vy = 0.0
-                    , id = i
+            polarInputColors
+                |> List.indexedMap
+                    (\i ( x, y ) ->
+                        { x = x
+                        , y = y
+                        , vx = 0.0
+                        , vy = 0.0
+                        , id = i
                         }
                     )
 
-        simulationResult : List (Force.Entity Int a)
-        simulationResult = Force.computeSimulation state (colorEntities colors)
-            
-        List.map2 (\c { x, y} -> (toPolar x y, c) ) colors simulationResult
+        simulationResult : List (Force.Entity Int {})
+        simulationResult =
+            Force.computeSimulation state colorEntities |> List.sortBy .id
 
+        entityToPolar : { a | x : Float, y : Float } -> ( Float, Float )
+        entityToPolar { x, y } =
+            toPolar ( x, y )
 
+        polarOutputColors : List ( Float, Float )
+        polarOutputColors =
+            List.map entityToPolar simulationResult
+
+        maxRadius : Float
+        maxRadius =
+            polarOutputColors |> List.map Tuple.first |> List.maximum |> Maybe.withDefault 1.0
+
+        minRadius : Float
+        minRadius =
+            polarInputColors |> List.map Tuple.first |> List.minimum |> Maybe.withDefault 0.0
+
+        newColors : List Color
+        newColors =
+            List.map
+                (\( r, theta ) ->
+                    let
+                        saturation =
+                            Scale.convert (saturationScaleWithExtent ( minRadius, maxRadius )) r
+                    in
+                    Color.fromHsla
+                        { hue = theta / (2 * Math.pi)
+                        , lightness = Scale.convert lightnessScale saturation
+                        , saturation = saturation
+                        , alpha = 1.0
+                        }
+                )
+                polarOutputColors
     in
-    resultingColors
-    |> List.map
-    |> List.map toPolar
-    |> List.map (\(a, b) -> { 
-                hue = a
-                , lightness = 0.5
-                , saturation = Scale.convert saturationScale b
-                , alpha = 1.0 } )
-    |> List.map Color.fromHsla
-
-
-
+    newColors
 
 
 
@@ -301,7 +367,7 @@ viewSeries model =
         |> List.map
             (\s ->
                 g []
-                    [ Path.element (area s.coordinates model) [ strokeWidth 3, fill <| Paint <| withOpacity 0.5 <| s.series.color ]
+                    [ Path.element (area s.coordinates model) [ strokeWidth 3, fill <| Paint <| withOpacity 1.0 <| s.series.color ]
                     , Path.element (line s.coordinates model) [ stroke <| Paint <| s.series.color, strokeWidth 1, fill PaintNone ]
                     ]
             )
@@ -311,20 +377,43 @@ view : Model -> Document Msg
 view model =
     { title = ""
     , body =
-        [ svg [ viewBox 0 0 w h ]
-            [ g [ transform [ Translate (padding - 1) (h - padding) ] ]
-                [ xAxis model ]
-            , g [ transform [ Translate (padding - 1) padding ] ]
-                [ yAxis model ]
-            , g [ transform [ Translate padding padding ], class [ "series" ] ]
-                (viewSeries model)
-            ]
+        [ viewChart model
         , button [ onClick OverlayClicked ] [ text "Overlaid" ]
         , button [ onClick StackedClicked ] [ text "Stacked" ]
         , button [ onClick StreamClicked ] [ text "Stream" ]
-        , button [ onClick SeparateClicked ] [ text "Separate" ]
+        , button [ onClick RidgeClicked ] [ text "Ridge" ]
+        , viewLegends model
         ]
     }
+
+
+viewChart : Model -> Svg Msg
+viewChart model =
+    svg [ viewBox 0 0 w h ]
+        [ g [ transform [ Translate (padding - 1) (h - padding) ] ]
+            [ xAxis model ]
+        , g [ transform [ Translate (padding - 1) padding ] ]
+            [ yAxis model ]
+        , g [ transform [ Translate padding padding ], class [ "series" ] ]
+            (viewSeries model)
+        ]
+
+
+viewLegends : Model -> Html Msg
+viewLegends model =
+    table []
+        [ thead [] [ tr [] [ th [] [ text "Brand" ], th [] [ text "Color" ], th [] [ text "Remapped" ] ] ]
+        , tbody [] (List.map2 viewSeriesLegend (List.reverse model.series) (List.reverse noDataSeries))
+        ]
+
+
+viewSeriesLegend : Series -> Series -> Html Msg
+viewSeriesLegend series origSeries =
+    tr []
+        [ td [] [ text series.name ]
+        , td [ style "background-color" (origSeries.color |> Color.toCssString) ] []
+        , td [ style "background-color" (series.color |> Color.toCssString) ] []
+        ]
 
 
 
@@ -459,9 +548,9 @@ update msg model =
             , Cmd.none
             )
 
-        SeparateClicked ->
+        RidgeClicked ->
             ( { model
-                | config = Separate
+                | config = Ridge
                 , seriesT = Transition.for 500 (interpolateStackResult (Transition.value model.seriesT) (separate model.series))
               }
             , Cmd.none
@@ -506,7 +595,7 @@ currentStacking series model =
         Stream ->
             stream series
 
-        Separate ->
+        Ridge ->
             separate series
 
 
