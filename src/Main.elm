@@ -107,21 +107,22 @@ noDataSeries =
     , { name = "Hyundai", data = [], color = Color.red }
     , { name = "Honda", data = [], color = Color.red }
     , { name = "Ford", data = [], color = Color.red }
-    , { name = "Kia0", data = [], color = Color.red }
-    , { name = "Kia2", data = [], color = Color.red }
-    , { name = "Kia3", data = [], color = Color.red }
-    , { name = "Kia4", data = [], color = Color.red }
-    , { name = "Kia5", data = [], color = Color.red }
-    , { name = "Kia6", data = [], color = Color.red }
-    , { name = "Kia7", data = [], color = Color.red }
-    , { name = "Kia8", data = [], color = Color.red }
-    , { name = "Kia9", data = [], color = Color.red }
-    , { name = "KiaA", data = [], color = Color.red }
-    , { name = "KiaB", data = [], color = Color.red }
-    , { name = "KiaC", data = [], color = Color.red }
-    , { name = "KiaD", data = [], color = Color.red }
-    , { name = "KiaE", data = [], color = Color.red }
-    , { name = "KiaF", data = [], color = Color.red }
+    , { name = "Kia", data = [], color = Color.red }
+
+    --, { name = "Kia2", data = [], color = Color.red }
+    --, { name = "Kia3", data = [], color = Color.red }
+    --, { name = "Kia4", data = [], color = Color.red }
+    --, { name = "Kia5", data = [], color = Color.red }
+    --, { name = "Kia6", data = [], color = Color.red }
+    --, { name = "Kia7", data = [], color = Color.red }
+    --, { name = "Kia8", data = [], color = Color.red }
+    --, { name = "Kia9", data = [], color = Color.red }
+    --, { name = "KiaA", data = [], color = Color.red }
+    --, { name = "KiaB", data = [], color = Color.red }
+    --, { name = "KiaC", data = [], color = Color.red }
+    --, { name = "KiaD", data = [], color = Color.red }
+    --, { name = "KiaE", data = [], color = Color.red }
+    --, { name = "KiaF", data = [], color = Color.red }
     ]
         |> List.map (\s -> { s | color = nameToColor s.name })
 
