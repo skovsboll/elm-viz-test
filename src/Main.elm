@@ -101,30 +101,29 @@ init _ =
 
 noDataSeries : List Series
 noDataSeries =
-    [ { name = "Chrysler", data = [], color = Color.green }
-    , { name = "Toyota", data = [], color = Color.blue }
-    , { name = "VW", data = [], color = Color.red }
-    , { name = "Hyundai", data = [], color = Color.red }
-    , { name = "Honda", data = [], color = Color.red }
-    , { name = "Ford", data = [], color = Color.red }
-    , { name = "Kia", data = [], color = Color.red }
-
-    --, { name = "Kia2", data = [], color = Color.red }
-    --, { name = "Kia3", data = [], color = Color.red }
-    --, { name = "Kia4", data = [], color = Color.red }
-    --, { name = "Kia5", data = [], color = Color.red }
-    --, { name = "Kia6", data = [], color = Color.red }
-    --, { name = "Kia7", data = [], color = Color.red }
-    --, { name = "Kia8", data = [], color = Color.red }
-    --, { name = "Kia9", data = [], color = Color.red }
-    --, { name = "KiaA", data = [], color = Color.red }
-    --, { name = "KiaB", data = [], color = Color.red }
-    --, { name = "KiaC", data = [], color = Color.red }
-    --, { name = "KiaD", data = [], color = Color.red }
-    --, { name = "KiaE", data = [], color = Color.red }
-    --, { name = "KiaF", data = [], color = Color.red }
+    [ seriesNamed "Chrysler"
+    , seriesNamed "Ford"
+    , seriesNamed "GM"
+    , seriesNamed "Renault"
+    , seriesNamed "Kia"
+    , seriesNamed "Toyota"
+    , seriesNamed "VW"
+    , seriesNamed "Peugeot"
+    , seriesNamed "Tesla"
+    , seriesNamed "Mercedes"
+    , seriesNamed "Skoda"
+    , seriesNamed "Nissan"
+    , seriesNamed "Honda"
+    , seriesNamed "Volvo"
+    , seriesNamed "Ellert"
+    , seriesNamed "Subaru"
+    , seriesNamed "BMW"
     ]
-        |> List.map (\s -> { s | color = nameToColor s.name })
+
+
+seriesNamed : String -> Series
+seriesNamed string =
+    { name = string, data = [], color = nameToColor string }
 
 
 initYExtent : Extent Float
@@ -230,12 +229,12 @@ spaceColors colors =
             List.length colors
 
         iterations =
-            3
+            4
 
         force : Force.Force Int
         force =
             List.range 0 (numberOfBodies - 1)
-                |> Force.manyBodyStrength (toFloat -numberOfBodies / iterations)
+                |> Force.manyBodyStrength (toFloat -numberOfBodies)
 
         state : Force.State Int
         state =
