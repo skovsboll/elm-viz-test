@@ -89,9 +89,9 @@ init _ =
         recoloredDataSeries =
             List.map2 (\s c -> { s | color = c }) noDataSeries spacedColors
     in
-    ( { config = Stream
+    ( { config = Ridge
       , series = recoloredDataSeries
-      , seriesT = Transition.constant (overlaid recoloredDataSeries)
+      , seriesT = Transition.constant (ridge recoloredDataSeries)
       , xExtent = initXExtent
       , xExtentT = Transition.constant initXExtent
       }
@@ -108,16 +108,23 @@ noDataSeries =
     , seriesNamed "Kia"
     , seriesNamed "Toyota"
     , seriesNamed "VW"
-    , seriesNamed "Peugeot"
-    , seriesNamed "Tesla"
-    , seriesNamed "Mercedes"
-    , seriesNamed "Skoda"
-    , seriesNamed "Nissan"
-    , seriesNamed "Honda"
-    , seriesNamed "Volvo"
-    , seriesNamed "Ellert"
-    , seriesNamed "Subaru"
-    , seriesNamed "BMW"
+
+    --, seriesNamed "Peugeot"
+    --, seriesNamed "Tesla"
+    --, seriesNamed "Mercedes"
+    --, seriesNamed "Skoda"
+    --, seriesNamed "Polestar"
+    --, seriesNamed "Jaguar"
+    --, seriesNamed "Bentley"
+    --, seriesNamed "Nissan"
+    --, seriesNamed "Honda"
+    --, seriesNamed "Volvo"
+    --, seriesNamed "Ellert"
+    --, seriesNamed "Subaru"
+    --, seriesNamed "BMW"
+    --, seriesNamed "X"
+    --, seriesNamed "Y"
+    --, seriesNamed "Z"
     ]
 
 
@@ -189,7 +196,12 @@ saturationScaleWithExtent extent =
 
 lightnessScale : ContinuousScale Float
 lightnessScale =
-    Scale.linear ( 0.85, 0.35 ) ( 0.0, 1.0 )
+    Scale.linear ( 0.15, 0.7 ) ( 0.0, 1.0 )
+
+
+lightnessScaleWithExtent : ( Float, Float ) -> ContinuousScale Float
+lightnessScaleWithExtent extent =
+    Scale.linear (Scale.range lightnessScale) extent
 
 
 
@@ -209,10 +221,10 @@ nameToColor name =
                 |> List.map (\byte -> byte / 256.0)
     in
     case fractions of
-        a :: b :: _ ->
+        a :: b :: c :: _ ->
             Color.fromHsla
                 { hue = a
-                , lightness = 0.5
+                , lightness = Scale.convert lightnessScale c
                 , saturation = Scale.convert saturationScale b
                 , alpha = 1.0
                 }
@@ -229,38 +241,90 @@ spaceColors colors =
             List.length colors
 
         iterations =
-            4
+            75
 
-        force : Force.Force Int
-        force =
+        range : List Math.Int
+        range =
             List.range 0 (numberOfBodies - 1)
-                |> Force.manyBodyStrength (toFloat -numberOfBodies)
+
+        reflectionForce : Force.Force Int
+        reflectionForce =
+            range
+                |> Force.manyBodyStrength -1.0
+
+        springForceStrength : Math.Float
+        springForceStrength =
+            1 + Math.sqrt (toFloat numberOfBodies)
+
+        springXForce : Force.Force Int
+        springXForce =
+            cartesianInputColors
+                |> List.indexedMap
+                    (\i coord2D ->
+                        { node = i
+                        , strength = springForceStrength
+                        , target = Tuple.first coord2D
+                        }
+                    )
+                |> Force.towardsX
+
+        springYForce : Force.Force Int
+        springYForce =
+            cartesianInputColors
+                |> List.indexedMap
+                    (\i coord2D ->
+                        { node = i
+                        , strength = springForceStrength
+                        , target = Tuple.second coord2D
+                        }
+                    )
+                |> Force.towardsY
+
+        stayOnColorCircleForce : Force.Force Int
+        stayOnColorCircleForce =
+            range
+                |> List.map
+                    (\i ->
+                        ( i
+                        , { strength = 0.5
+                          , x = 0.0
+                          , y = 0.0
+                          , radius = 0.5
+                          }
+                        )
+                    )
+                |> Force.customRadial
+
+        collisionForce : Force.Force Int
+        collisionForce =
+            Force.collision 0.1 range
 
         state : Force.State Int
         state =
-            Force.simulation [ force ]
+            Force.simulation [ springXForce, springYForce, collisionForce, stayOnColorCircleForce, reflectionForce ]
                 |> Force.iterations iterations
+
+        hslaColors : List { hue : Float, saturation : Float, lightness : Float, alpha : Float }
+        hslaColors =
+            colors
+                |> List.map Color.toHsla
 
         polarInputColors : List ( Float, Float )
         polarInputColors =
-            colors
-                |> List.map Color.toHsla
-                |> List.map (\c -> fromPolar ( c.saturation, c.hue * 2 * Math.pi ))
+            hslaColors
+                |> List.map (\c -> ( c.lightness, c.hue * 2 * Math.pi ))
 
-        colorEntities : List (Force.Entity Int {})
-        colorEntities =
+        cartesianInputColors : List ( Float, Float )
+        cartesianInputColors =
             polarInputColors
-                |> List.indexedMap
-                    (\i ( x, y ) ->
-                        { x = x
-                        , y = y
-                        , vx = 0.0
-                        , vy = 0.0
-                        , id = i
-                        }
-                    )
+                |> List.map fromPolar
 
-        simulationResult : List (Force.Entity Int {})
+        colorEntities : List (Force.Entity Int { value : Color })
+        colorEntities =
+            colors
+                |> List.indexedMap Force.entity
+
+        simulationResult : List (Force.Entity Int { value : Color })
         simulationResult =
             Force.computeSimulation state colorEntities |> List.sortBy .id
 
@@ -272,30 +336,25 @@ spaceColors colors =
         polarOutputColors =
             List.map entityToPolar simulationResult
 
-        maxRadius : Float
-        maxRadius =
-            polarOutputColors |> List.map Tuple.first |> List.maximum |> Maybe.withDefault 1.0
-
-        minRadius : Float
-        minRadius =
-            polarInputColors |> List.map Tuple.first |> List.minimum |> Maybe.withDefault 0.0
+        satExtent : ( Float, Float )
+        satExtent =
+            List.map Tuple.first polarOutputColors
+                |> Statistics.extent
+                |> Maybe.withDefault ( 0.0, 1.0 )
 
         newColors : List Color
         newColors =
-            List.map
-                (\( r, theta ) ->
-                    let
-                        saturation =
-                            Scale.convert (saturationScaleWithExtent ( minRadius, maxRadius )) r
-                    in
+            List.map2
+                (\( _, theta ) origColor ->
                     Color.fromHsla
                         { hue = theta / (2 * Math.pi)
-                        , lightness = Scale.convert lightnessScale saturation
-                        , saturation = saturation
+                        , lightness = origColor.lightness
+                        , saturation = origColor.saturation
                         , alpha = 1.0
                         }
                 )
                 polarOutputColors
+                (List.map Color.toHsla colors)
     in
     newColors
 
@@ -362,6 +421,10 @@ seriessToCoords model =
 
 viewSeries : Model -> List (Svg Msg)
 viewSeries model =
+    let
+        _ =
+            Debug.log "view" "series"
+    in
     model
         |> seriessToCoords
         |> List.map
@@ -382,7 +445,7 @@ view model =
         , button [ onClick StackedClicked ] [ text "Stacked" ]
         , button [ onClick StreamClicked ] [ text "Stream" ]
         , button [ onClick RidgeClicked ] [ text "Ridge" ]
-        , viewLegends model
+        , viewLegends model.series
         ]
     }
 
@@ -399,11 +462,11 @@ viewChart model =
         ]
 
 
-viewLegends : Model -> Html Msg
-viewLegends model =
+viewLegends : List Series -> Html Msg
+viewLegends series =
     table []
         [ thead [] [ tr [] [ th [] [ text "Brand" ], th [] [ text "Color" ], th [] [ text "Remapped" ] ] ]
-        , tbody [] (List.map2 viewSeriesLegend (List.reverse model.series) (List.reverse noDataSeries))
+        , tbody [] (List.map2 viewSeriesLegend (List.reverse series) (List.reverse noDataSeries))
         ]
 
 
@@ -551,7 +614,7 @@ update msg model =
         RidgeClicked ->
             ( { model
                 | config = Ridge
-                , seriesT = Transition.for 500 (interpolateStackResult (Transition.value model.seriesT) (separate model.series))
+                , seriesT = Transition.for 500 (interpolateStackResult (Transition.value model.seriesT) (ridge model.series))
               }
             , Cmd.none
             )
@@ -596,7 +659,7 @@ currentStacking series model =
             stream series
 
         Ridge ->
-            separate series
+            ridge series
 
 
 overlaid : List Series -> StackResult String
@@ -641,8 +704,8 @@ stream series =
     Shape.stack config
 
 
-separate : List Series -> StackResult String
-separate series =
+ridge : List Series -> StackResult String
+ridge series =
     let
         config =
             { data = List.map (\s -> Tuple.pair s.name (List.map .y s.data)) series
