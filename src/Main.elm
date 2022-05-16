@@ -4,9 +4,9 @@ import Axis
 import Basics as Math
 import Browser exposing (Document)
 import Browser.Events
-import Color exposing (Color)
+import Color exposing (Color, black)
 import Force
-import Html exposing (Html, a, button, table, tbody, td, text, th, thead, tr)
+import Html exposing (Html, a, button, table, tbody, td, text, tfoot, th, thead, tr)
 import Html.Attributes exposing (style)
 import Html.Events exposing (onClick)
 import Interpolation exposing (Interpolator)
@@ -18,9 +18,9 @@ import Shape exposing (StackResult)
 import Statistics
 import Time
 import Transition exposing (Transition)
-import TypedSvg exposing (g, svg)
+import TypedSvg exposing (circle, g, svg)
 import TypedSvg.Attributes exposing (class, fill, opacity, stroke, transform, viewBox)
-import TypedSvg.Attributes.InPx exposing (strokeWidth)
+import TypedSvg.Attributes.InPx exposing (cx, cy, height, r, strokeWidth, width)
 import TypedSvg.Core exposing (Svg)
 import TypedSvg.Types exposing (Paint(..), Transform(..))
 
@@ -33,6 +33,7 @@ type Msg
     | StackedClicked
     | StreamClicked
     | RidgeClicked
+    | AddClicked
 
 
 type alias Extent a =
@@ -52,6 +53,7 @@ type alias Model =
     , seriesT : Transition (StackResult String)
     , xExtent : Extent Time.Posix
     , xExtentT : Transition (Extent Time.Posix)
+    , take : Int
     }
 
 
@@ -79,24 +81,39 @@ type alias Datum =
 init : () -> ( Model, Cmd msg )
 init _ =
     let
-        spacedColors : List Color
-        spacedColors =
-            noDataSeries
-                |> List.map .color
-                |> spaceColors
+        firstSeriesCount : number
+        firstSeriesCount =
+            2
 
         recoloredDataSeries : List Series
         recoloredDataSeries =
-            List.map2 (\s c -> { s | color = c }) noDataSeries spacedColors
+            updateColoredSeries firstSeriesCount
     in
     ( { config = Ridge
       , series = recoloredDataSeries
       , seriesT = Transition.constant (ridge recoloredDataSeries)
       , xExtent = initXExtent
       , xExtentT = Transition.constant initXExtent
+      , take = firstSeriesCount
       }
     , Cmd.none
     )
+
+
+updateColoredSeries : Int -> List Series
+updateColoredSeries count =
+    let
+        firstSeries : List Series
+        firstSeries =
+            List.take count noDataSeries
+
+        spacedColors : List Color
+        spacedColors =
+            firstSeries
+                |> List.map .color
+                |> spaceColors
+    in
+    List.map2 (\s c -> { s | color = c }) firstSeries spacedColors
 
 
 noDataSeries : List Series
@@ -107,24 +124,29 @@ noDataSeries =
     , seriesNamed "Renault"
     , seriesNamed "Kia"
     , seriesNamed "Toyota"
+    , seriesNamed "Audi"
     , seriesNamed "VW"
-
-    --, seriesNamed "Peugeot"
-    --, seriesNamed "Tesla"
-    --, seriesNamed "Mercedes"
-    --, seriesNamed "Skoda"
-    --, seriesNamed "Polestar"
-    --, seriesNamed "Jaguar"
-    --, seriesNamed "Bentley"
-    --, seriesNamed "Nissan"
-    --, seriesNamed "Honda"
-    --, seriesNamed "Volvo"
-    --, seriesNamed "Ellert"
-    --, seriesNamed "Subaru"
-    --, seriesNamed "BMW"
-    --, seriesNamed "X"
-    --, seriesNamed "Y"
-    --, seriesNamed "Z"
+    , seriesNamed "Peugeot"
+    , seriesNamed "Tesla"
+    , seriesNamed "Mercedes"
+    , seriesNamed "Skoda"
+    , seriesNamed "Polestar"
+    , seriesNamed "Jaguar"
+    , seriesNamed "Alfa Romeo"
+    , seriesNamed "Bentley"
+    , seriesNamed "Nissan"
+    , seriesNamed "Honda"
+    , seriesNamed "Volvo"
+    , seriesNamed "Ellert"
+    , seriesNamed "Hyundai"
+    , seriesNamed "Subaru"
+    , seriesNamed "BMW"
+    , seriesNamed "Lamborghini"
+    , seriesNamed "Porsche"
+    , seriesNamed "Ferrari"
+    , seriesNamed "Cadillac"
+    , seriesNamed "Lexus"
+    , seriesNamed "Rolls-Royce"
     ]
 
 
@@ -196,7 +218,7 @@ saturationScaleWithExtent extent =
 
 lightnessScale : ContinuousScale Float
 lightnessScale =
-    Scale.linear ( 0.15, 0.7 ) ( 0.0, 1.0 )
+    Scale.linear ( 0.1, 0.8 ) ( 0.0, 1.0 )
 
 
 lightnessScaleWithExtent : ( Float, Float ) -> ContinuousScale Float
@@ -224,8 +246,8 @@ nameToColor name =
         a :: b :: c :: _ ->
             Color.fromHsla
                 { hue = a
-                , lightness = Scale.convert lightnessScale c
-                , saturation = Scale.convert saturationScale b
+                , lightness = Scale.convert lightnessScale b
+                , saturation = Scale.convert saturationScale c
                 , alpha = 1.0
                 }
 
@@ -286,7 +308,7 @@ spaceColors colors =
                 |> List.map
                     (\i ->
                         ( i
-                        , { strength = 0.5
+                        , { strength = 2.0
                           , x = 0.0
                           , y = 0.0
                           , radius = 0.5
@@ -345,10 +367,10 @@ spaceColors colors =
         newColors : List Color
         newColors =
             List.map2
-                (\( _, theta ) origColor ->
+                (\( r, theta ) origColor ->
                     Color.fromHsla
                         { hue = theta / (2 * Math.pi)
-                        , lightness = origColor.lightness
+                        , lightness = Scale.convert (lightnessScaleWithExtent satExtent) r
                         , saturation = origColor.saturation
                         , alpha = 1.0
                         }
@@ -440,14 +462,40 @@ view : Model -> Document Msg
 view model =
     { title = ""
     , body =
-        [ viewChart model
-        , button [ onClick OverlayClicked ] [ text "Overlaid" ]
-        , button [ onClick StackedClicked ] [ text "Stacked" ]
-        , button [ onClick StreamClicked ] [ text "Stream" ]
-        , button [ onClick RidgeClicked ] [ text "Ridge" ]
-        , viewLegends model.series
+        [ --viewChart model
+          button [ onClick AddClicked ] [ text "+" ]
+
+        --, button [ onClick OverlayClicked ] [ text "Overlaid" ]
+        --, button [ onClick StackedClicked ] [ text "Stacked" ]
+        --, button [ onClick StreamClicked ] [ text "Stream" ]
+        --, button [ onClick RidgeClicked ] [ text "Ridge" ]
+        , viewLegends model
         ]
     }
+
+
+viewColorsInCircle : List Series -> Svg Msg
+viewColorsInCircle series =
+    svg [ height 100, width 100 ]
+        ([ circle [ cx 50, cy 50, r 48, stroke (Paint Color.black), strokeWidth 1, fill (Paint Color.white) ] []
+         ]
+            ++ List.map viewColorInCircle series
+        )
+
+
+viewColorInCircle : Series -> Svg Msg
+viewColorInCircle series =
+    let
+        ( x, y ) =
+            series.color |> Color.toHsla |> (\c -> ( c.lightness, c.hue * 2 * pi )) |> fromPolar
+
+        x_ =
+            50 + 45 * x
+
+        y_ =
+            50 - 45 * y
+    in
+    circle [ cx x_, cy y_, r 4, strokeWidth 0, fill (Paint series.color) ] []
 
 
 viewChart : Model -> Svg Msg
@@ -462,11 +510,18 @@ viewChart model =
         ]
 
 
-viewLegends : List Series -> Html Msg
-viewLegends series =
+viewLegends : Model -> Html Msg
+viewLegends model =
     table []
         [ thead [] [ tr [] [ th [] [ text "Brand" ], th [] [ text "Color" ], th [] [ text "Remapped" ] ] ]
-        , tbody [] (List.map2 viewSeriesLegend (List.reverse series) (List.reverse noDataSeries))
+        , tbody [] (List.map2 viewSeriesLegend model.series noDataSeries)
+        , tfoot []
+            [ td [] []
+            , td []
+                [ viewColorsInCircle (List.take model.take noDataSeries)
+                ]
+            , td [] [ viewColorsInCircle model.series ]
+            ]
         ]
 
 
@@ -615,6 +670,23 @@ update msg model =
             ( { model
                 | config = Ridge
                 , seriesT = Transition.for 500 (interpolateStackResult (Transition.value model.seriesT) (ridge model.series))
+              }
+            , Cmd.none
+            )
+
+        AddClicked ->
+            let
+                newCount =
+                    if model.take < List.length noDataSeries then
+                        model.take + 1
+
+                    else
+                        model.take
+            in
+            ( { model
+                | take =
+                    newCount
+                , series = updateColoredSeries newCount
               }
             , Cmd.none
             )
